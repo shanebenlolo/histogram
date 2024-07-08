@@ -11,13 +11,18 @@ interface WebGLProgramInfo {
     projectionMatrix: WebGLUniformLocation;
     modelViewMatrix: WebGLUniformLocation;
     uSampler: WebGLUniformLocation;
+    uResolution: WebGLUniformLocation;
+    uTime: WebGLUniformLocation;
   };
 }
+
+const width = 1080;
+const height = 1080;
 
 // Set up the HTML structure
 document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
   <div>
-    <canvas id="webglCanvas" width="1080" height="1080" style="border:1px solid #000000;"></canvas>
+    <canvas id="webglCanvas" width="${width}" height="${height}" style="border:1px solid #000000;"></canvas>
   </div>
 `;
 
@@ -36,69 +41,98 @@ async function main() {
     return;
   }
 
-  const shaderProgram = initShaderProgram(gl)!;
+  const vsUrl = "http://localhost:3000/vertexShader.glsl";
+  const fsUrl = "http://localhost:3000/fragmentShader.glsl";
+  const textureUrl = "http://localhost:3000/black-circle.jpg";
+  const shaderProgram = await initShaderProgram(gl, vsUrl, fsUrl)!;
   const buffers = initBuffers(gl);
-  const texture = await initTexture(
-    gl,
-    "http://localhost:3000/black-circle.jpg"
-  );
+  const texture = await initTexture(gl, textureUrl);
 
   const programInfo: WebGLProgramInfo = {
-    program: shaderProgram,
+    program: shaderProgram!,
     attribLocations: {
-      vertexPosition: gl.getAttribLocation(shaderProgram, "aVertexPosition"),
-      textureCoord: gl.getAttribLocation(shaderProgram, "aTextureCoord"),
+      vertexPosition: gl.getAttribLocation(shaderProgram!, "aVertexPosition"),
+      textureCoord: gl.getAttribLocation(shaderProgram!, "aTextureCoord"),
     },
     uniformLocations: {
       projectionMatrix: gl.getUniformLocation(
-        shaderProgram,
+        shaderProgram!,
         "uProjectionMatrix"
       )!,
       modelViewMatrix: gl.getUniformLocation(
-        shaderProgram,
+        shaderProgram!,
         "uModelViewMatrix"
       )!,
-      uSampler: gl.getUniformLocation(shaderProgram, "uSampler")!,
+      uResolution: gl.getUniformLocation(shaderProgram!, "uResolution")!,
+      uSampler: gl.getUniformLocation(shaderProgram!, "uSampler")!,
+      uTime: gl.getUniformLocation(shaderProgram!, "uTime")!,
     },
   };
 
-  drawScene(gl, programInfo, buffers, texture);
+  function render(time: number) {
+    // prepare scene (update)
+
+    drawScene(gl, programInfo, buffers, texture, time);
+    requestAnimationFrame(render); // Continuously re-render the scene
+  }
+
+  requestAnimationFrame(render); // Start the rendering loop
 }
 
-function initShaderProgram(gl: WebGL2RenderingContext) {
-  const vsSource = `
-    attribute vec4 aVertexPosition;
-    attribute vec2 aTextureCoord;
-    varying highp vec2 vTextureCoord;
-    uniform mat4 uModelViewMatrix;
-    uniform mat4 uProjectionMatrix;
-    void main() {
-      gl_Position = uProjectionMatrix * uModelViewMatrix * aVertexPosition;
-      vTextureCoord = aTextureCoord;
+async function initShaderProgram(
+  gl: WebGL2RenderingContext,
+  vsUrl: string,
+  fsUrl: string
+) {
+  async function loadShaderSource(url: string) {
+    const response = await fetch(url);
+    if (!response.ok) {
+      throw new Error(
+        `Failed to load shader from ${url}: ${response.statusText}`
+      );
     }
-  `;
+    return response.text();
+  }
 
-  const fsSource = `
-    varying highp vec2 vTextureCoord;
-    uniform sampler2D uSampler;
-    void main() {
-      gl_FragColor = texture2D(uSampler, vTextureCoord);
+  // Load shader sources from URLs
+  const vsSource = await loadShaderSource(vsUrl);
+  const fsSource = await loadShaderSource(fsUrl);
+
+  // Utility function to create a shader
+  function loadShader(
+    gl: WebGL2RenderingContext,
+    type: number,
+    source: string
+  ) {
+    const shader = gl.createShader(type)!;
+    gl.shaderSource(shader, source);
+    gl.compileShader(shader);
+    if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
+      alert(
+        "An error occurred compiling the shaders: " +
+          gl.getShaderInfoLog(shader)
+      );
+      gl.deleteShader(shader);
+      return null;
     }
-  `;
+    return shader;
+  }
 
+  // Create shaders
   const vertexShader = loadShader(gl, gl.VERTEX_SHADER, vsSource)!;
   const fragmentShader = loadShader(gl, gl.FRAGMENT_SHADER, fsSource)!;
 
+  // Create shader program
   const shaderProgram = gl.createProgram()!;
   gl.attachShader(shaderProgram, vertexShader);
   gl.attachShader(shaderProgram, fragmentShader);
   gl.linkProgram(shaderProgram);
 
+  // Check for linking errors
   if (!gl.getProgramParameter(shaderProgram, gl.LINK_STATUS)) {
     alert(
-      `Unable to initialize the shader program: ${gl.getProgramInfoLog(
-        shaderProgram
-      )}`
+      "Unable to initialize the shader program: " +
+        gl.getProgramInfoLog(shaderProgram)
     );
     return null;
   }
@@ -164,7 +198,8 @@ function drawScene(
     position: WebGLBuffer | null;
     textureCoord: WebGLBuffer | null;
   },
-  texture: WebGLTexture | null
+  texture: WebGLTexture | null,
+  time: number
 ) {
   gl.clearColor(0.0, 0.0, 0.0, 1.0);
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
@@ -194,11 +229,13 @@ function drawScene(
 
   gl.activeTexture(gl.TEXTURE0);
   gl.bindTexture(gl.TEXTURE_2D, texture);
-  gl.uniform1i(programInfo.uniformLocations.uSampler, 0);
+  gl.uniform1i(programInfo.uniformLocations.uSampler, 0); //sampler2d
+
+  gl.uniform1f(programInfo.uniformLocations.uTime, time / 1000);
+  gl.uniform2f(programInfo.uniformLocations.uResolution, width, height); // vec2
 
   const fieldOfView = (45 * Math.PI) / 180;
   const aspect = gl.canvas.width / gl.canvas.height;
-  console.log(gl.canvas.width);
   const zNear = 0.1;
   const zFar = 100.0;
   const projectionMatrix = mat4.create();
@@ -219,23 +256,4 @@ function drawScene(
   );
 
   gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-}
-
-//
-// creates a shader of the given type, uploads the source and
-// compiles it.
-//
-function loadShader(gl: WebGL2RenderingContext, type: number, source: string) {
-  const shader = gl.createShader(type)!;
-  gl.shaderSource(shader, source);
-  gl.compileShader(shader);
-  if (!gl.getShaderParameter(shader, gl.COMPILE_STATUS)) {
-    alert(
-      `An error occurred compiling the shaders: ${gl.getShaderInfoLog(shader)}`
-    );
-    gl.deleteShader(shader);
-    return null;
-  }
-
-  return shader;
 }
