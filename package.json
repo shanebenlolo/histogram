@@ -3,6 +3,9 @@
   "private": true,
   "version": "0.0.0",
   "type": "module",
+  "prettier": {
+    "printWidth": 120
+  },
   "scripts": {
     "dev": "vite",
     "build": "tsc && vite build",
