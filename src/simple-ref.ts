@@ -60,7 +60,7 @@ async function main() {
 
   // setup texture
   const textureBuffer = gl.createBuffer();
-  const textureAttributeLocation = gl.getAttribLocation(program, "aTextureCoord");
+  const textureAttributeLocation = gl.getAttribLocation(program, "a_texCoord");
   gl.bindBuffer(gl.ARRAY_BUFFER, textureBuffer);
   const textureCoords = [1.0, 1.0, -1.0, 1.0, 1.0, -1.0, -1.0, -1.0];
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(textureCoords), gl.STATIC_DRAW);
