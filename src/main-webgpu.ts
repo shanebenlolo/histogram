@@ -1,95 +1,141 @@
-import "./style.css";
 
-const width = 1080;
-const height = 1080;
-const vsUrl = "http://localhost:3000/vertexShader.glsl";
-const fsUrl = "http://localhost:3000/fragmentShader.glsl";
-const imageUrl = "http://localhost:3000/black-circle.jpg";
+import { InitGPU, CreateGPUBuffer, CreateTransforms, CreateViewProjection } from './helper';
+import { shader } from './shader';
 
-enum WGSL_MEM_SIZE {
-  VEC_4_F = 4 * 4, // 4 32bit floats (4bytes each)
-  VEC_2_F = 2 * 4, // 2 32bit floats (4bytes each)
-}
+import "./site.css";
+import { CubeData } from './vertex_data';
+import { mat4 } from 'gl-matrix';
 
-// Set up the HTML structure
-document.querySelector<HTMLDivElement>("#app")!.innerHTML = `
-  <div>
-    <canvas id="webglCanvas" width="${width}" height="${height}" style="border:1px solid #000000;"></canvas>
-  </div>
-`;
+const Create3DObject = async () => {
+  const gpu = await InitGPU();
+  const device = gpu.device;
 
-main();
-
-async function main() {
-  const canvas = document.getElementById("webglCanvas") as HTMLCanvasElement;
-  const adapter = await navigator.gpu?.requestAdapter();
-  const device = await adapter?.requestDevice()!;
-  if (!device) {
-    new Error("need a browser that supports WebGPU");
-    return;
-  }
-  const context = canvas.getContext("webgpu")!;
-  const presentationFormat = navigator.gpu.getPreferredCanvasFormat();
-  context.configure({ device, format: presentationFormat });
-
-  const module = device.createShaderModule({
-    label: "our hardcoded red triangle shaders",
-    code: `
-      @vertex fn vs(
-        @builtin(vertex_index) vertexIndex : u32
-      ) -> @builtin(position) vec4f {
-        let pos = array(
-          vec2f( 0.0,  0.5),  // top center
-          vec2f(-0.5, -0.5),  // bottom left
-          vec2f( 0.5, -0.5)   // bottom right
-        );
-
-        return vec4f(pos[vertexIndex], 0.0, 1.0);
-      }
-
-      @fragment fn fs() -> @location(0) vec4f {
-        return vec4f(1, 0, 0, 1);
-      }
-    `,
-  });
+  // create vertex buffers
+  const cubeData = CubeData();
+  const numberOfVertices = cubeData.positions.length / 3;
+  const vertexBuffer = CreateGPUBuffer(device, cubeData.positions);
+  const colorBuffer = CreateGPUBuffer(device, cubeData.colors);
 
   const pipeline = device.createRenderPipeline({
-    label: "our hardcoded red triangle pipeline",
-    layout: "auto",
-    vertex: {
-      module,
-    },
-    fragment: {
-      module,
-      targets: [{ format: presentationFormat }],
-    },
+      layout:'auto',
+      vertex: {
+          module: device.createShaderModule({                    
+              code: shader
+          }),
+          entryPoint: "vs_main",
+          buffers:[
+              {
+                  arrayStride: 12,
+                  attributes: [{
+                      shaderLocation: 0,
+                      format: "float32x3",
+                      offset: 0
+                  }]
+              },
+              {
+                  arrayStride: 12,
+                  attributes: [{
+                      shaderLocation: 1,
+                      format: "float32x3",
+                      offset: 0
+                  }]
+              }
+          ]
+      },
+      fragment: {
+          module: device.createShaderModule({                    
+              code: shader
+          }),
+          entryPoint: "fs_main",
+          targets: [
+              {
+                  format: gpu.format as GPUTextureFormat
+              }
+          ]
+      },
+      primitive:{
+          topology: "triangle-list",
+          cullMode: 'back'
+      },
+      depthStencil:{
+          format: "depth24plus",
+          depthWriteEnabled: true,
+          depthCompare: "less"
+      }
   });
 
-  function render() {
-    const renderPassDescriptor: GPURenderPassDescriptor = {
-      label: "our basic canvas renderPass",
-      colorAttachments: [
-        {
-          view: context.getCurrentTexture().createView(),
-          clearValue: [0.3, 0.3, 0.3, 1],
-          loadOp: "clear",
-          storeOp: "store",
-        },
-      ],
-    };
+  // create uniform data
+  const modelMatrix = mat4.create();
+  const mvpMatrix = mat4.create();
+  let vpMatrix = mat4.create();
+  const vp = CreateViewProjection(gpu.canvas.width/gpu.canvas.height);
+  vpMatrix = vp.viewProjectionMatrix;
 
-    // make a command encoder to start encoding commands
-    const encoder = device.createCommandEncoder({ label: "our encoder" });
+  // create uniform buffer and bind group
+  const uniformBuffer = device.createBuffer({
+      size: 64,
+      usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST
+  });
 
-    // make a render pass encoder to encode render specific commands
-    const pass = encoder.beginRenderPass(renderPassDescriptor);
-    pass.setPipeline(pipeline);
-    pass.draw(3); // call our vertex shader 3 times.
-    pass.end();
+  const uniformBindGroup = device.createBindGroup({
+      layout: pipeline.getBindGroupLayout(0),
+      entries: [
+          {
+              binding: 0,
+              resource: {
+                  buffer: uniformBuffer,
+                  offset: 0,
+                  size: 64
+              }
+          }
+      ]
+  });
 
-    const commandBuffer = encoder.finish();
-    device.queue.submit([commandBuffer]);
-  }
+  const textureView = gpu.context.getCurrentTexture().createView();
+  const depthTexture = device.createTexture({
+      size: [gpu.canvas.width, gpu.canvas.height, 1],
+      format: "depth24plus",
+      usage: GPUTextureUsage.RENDER_ATTACHMENT
+  });
+  const renderPassDescription = {
+      colorAttachments: [{
+          view: textureView,
+          clearValue: { r: 0.2, g: 0.247, b: 0.314, a: 1.0  }, //background color
+          //loadValue: { r: 0.2, g: 0.247, b: 0.314, a: 1.0  }, 
+          loadOp: 'clear',
+          storeOp: 'store'
+      }],
+      depthStencilAttachment: {
+          view: depthTexture.createView(),
+          depthLoadValue: 1.0,
+          depthClearValue: 1.0,
+          depthLoadOp: 'clear',
+          depthStoreOp: "store",
+          /*stencilClearValue: 0,
+          stencilLoadValue: 0,
+          stencilLoadOp: 'clear',
+          stencilStoreOp: "store"*/
+      }
+  };
+  
+  CreateTransforms(modelMatrix);
+  mat4.multiply(mvpMatrix, vpMatrix, modelMatrix);
+  device.queue.writeBuffer(uniformBuffer, 0, mvpMatrix as ArrayBuffer);
 
-  render();
+  const commandEncoder = device.createCommandEncoder();
+  const renderPass = commandEncoder.beginRenderPass(renderPassDescription as GPURenderPassDescriptor);
+  renderPass.setPipeline(pipeline);
+  renderPass.setVertexBuffer(0, vertexBuffer);
+  renderPass.setVertexBuffer(1, colorBuffer);
+  renderPass.setBindGroup(0, uniformBindGroup);
+  renderPass.draw(numberOfVertices);
+  renderPass.end();
+
+  device.queue.submit([commandEncoder.finish()]);
 }
+
+Create3DObject();
+
+window.addEventListener('resize', function(){
+  Create3DObject();
+});
