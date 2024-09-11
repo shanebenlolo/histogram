@@ -14,6 +14,7 @@ const Create3DObject = async () => {
   const numberOfVertices = cubeData.positions.length / 3;
   const vertexBuffer = CreateGPUBuffer(device, cubeData.positions);
   const colorBuffer = CreateGPUBuffer(device, cubeData.colors);
+  const kNumObjects = 20;
 
   const pipeline = device.createRenderPipeline({
     layout: "auto",
@@ -80,9 +81,10 @@ const Create3DObject = async () => {
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  const uniformBindGroup = device.createBindGroup({
+  const bindGroup = device.createBindGroup({
     layout: pipeline.getBindGroupLayout(0),
     entries: [
+      // uniform buffer
       {
         binding: 0,
         resource: {
@@ -137,8 +139,8 @@ const Create3DObject = async () => {
     renderPass.setPipeline(pipeline);
     renderPass.setVertexBuffer(0, vertexBuffer);
     renderPass.setVertexBuffer(1, colorBuffer);
-    renderPass.setBindGroup(0, uniformBindGroup);
-    renderPass.draw(numberOfVertices);
+    renderPass.setBindGroup(0, bindGroup);
+    renderPass.draw(numberOfVertices, kNumObjects);
     renderPass.end();
 
     device.queue.submit([commandEncoder.finish()]);

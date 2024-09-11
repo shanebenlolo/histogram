@@ -163,8 +163,9 @@ export const CheckWebGPU = () => {
 };
 
 export function transformPositions(time: number, positions: Float32Array) {
-  const yValue = 1 + 0.5 * Math.sin(time / 1000);
-  const negYValue = -(1 + 0.5 * Math.sin(time / 1000));
+  // osciallte between 0.1 and 1.5 just for fun
+  const yValue = 0.7 * Math.sin(time / 1000) + 0.8;
+  const negYValue = -(0.7 * Math.sin(time / 1000) + 0.8);
 
   // front
   positions[1] = negYValue;
