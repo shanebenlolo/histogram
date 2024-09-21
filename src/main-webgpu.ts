@@ -8,8 +8,8 @@ const Create3DObject = async () => {
   const gpu = await InitGPU();
   const device = gpu.device;
 
-  const kNumObjects = 256;
-  let kNumRows = 1;
+  const kNumObjects = 512;
+  let kNumRows = 512;
   const cubeData = CubeData();
 
   const instanceHeights = new Float32Array(kNumObjects);
@@ -19,7 +19,7 @@ const Create3DObject = async () => {
   const numberOfVertices = cubeData.positions.length / 3;
 
   const vertexBuffer = CreateGPUBuffer(device, cubeData.positions);
-  const colorBuffer = CreateGPUBuffer(device, cubeData.colors);
+  // const colorBuffer = CreateGPUBuffer(device, cubeData.colors);
   // const instanceHeightBuffer = CreateGPUBuffer(device, instanceHeights);
 
   // Enable multisampling by setting the sample count to 4 (you can change it based on your requirements)
@@ -30,7 +30,17 @@ const Create3DObject = async () => {
       {
         binding: 0,
         visibility: GPUShaderStage.VERTEX,
-        buffer: { type: "uniform", minBindingSize: 80 }, // 64 bytes for mat4x4<f32> + 4 bytes for rowCount + 12 bytes padding
+        buffer: { type: "uniform", minBindingSize: 64 }, // 64 bytes for mat4x4<f32> + 4 bytes for rowCount + 12 bytes padding
+      },
+      {
+        binding: 1,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: "uniform", minBindingSize: 16 }, // 4 bytes for rowCount + 12 bytes padding
+      },
+      {
+        binding: 2,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: "uniform", minBindingSize: 16 }, // 4 bytes for rowCount + 12 bytes padding
       },
     ],
   });
@@ -50,10 +60,10 @@ const Create3DObject = async () => {
           arrayStride: 12,
           attributes: [{ shaderLocation: 0, format: "float32x3", offset: 0 }],
         },
-        {
-          arrayStride: 12,
-          attributes: [{ shaderLocation: 1, format: "float32x3", offset: 0 }],
-        },
+        // {
+        //   arrayStride: 12,
+        //   attributes: [{ shaderLocation: 1, format: "float32x3", offset: 0 }],
+        // },
         // {
         //   arrayStride: 4,
         //   stepMode: "instance",
@@ -96,8 +106,20 @@ const Create3DObject = async () => {
   vpMatrix = vp.viewProjectionMatrix;
 
   // Create a uniform buffer that combines both the MVP matrix and the time
-  const uniformsBuffer = device.createBuffer({
-    size: 80, // 64 bytes for mat4x4<f32> + 4 bytes for rowCount + 12 bytes padding
+  const mvpBuffer = device.createBuffer({
+    size: 64, // 64 bytes for mat4x4<f32>
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // Create a uniform buffer that combines both the MVP matrix and the time
+  const rowCountBuffer = device.createBuffer({
+    size: 16, // 4 bytes for rowCount + 12 bytes padding
+    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
+  });
+
+  // Create a uniform buffer that combines both the MVP matrix and the time
+  const timeBuffer = device.createBuffer({
+    size: 16, // 4 bytes for rowCount + 12 bytes padding
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
@@ -107,9 +129,19 @@ const Create3DObject = async () => {
       {
         binding: 0,
         resource: {
-          buffer: uniformsBuffer,
-          offset: 0,
-          size: 80,
+          buffer: mvpBuffer,
+        },
+      },
+      {
+        binding: 1,
+        resource: {
+          buffer: rowCountBuffer,
+        },
+      },
+      {
+        binding: 2,
+        resource: {
+          buffer: timeBuffer,
         },
       },
     ],
@@ -118,10 +150,14 @@ const Create3DObject = async () => {
   CreateTransforms(modelMatrix);
   mat4.multiply(mvpMatrix, vpMatrix, modelMatrix);
 
-  const uniforms = new Float32Array(20); // 16 for matrix, 1 for rowCount, 3 padding
-  uniforms.set(mvpMatrix, 0); // Set the mvpMatrix
-  uniforms[16] = kNumRows; // Set the rowCount
-  device.queue.writeBuffer(uniformsBuffer, 0, uniforms.buffer, 0, uniforms.byteLength);
+  device.queue.writeBuffer(mvpBuffer, 0, mvpMatrix as ArrayBuffer);
+  device.queue.writeBuffer(rowCountBuffer, 0, new Float32Array([kNumRows]));
+
+  // const depthTexture = device.createTexture({
+  //   size: [gpu.canvas.width, gpu.canvas.height, 1],
+  //   format: "depth24plus",
+  //   usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  // });
 
   // Create multisampled color texture
   const multisampledColorTexture = device.createTexture({
@@ -131,21 +167,22 @@ const Create3DObject = async () => {
     usage: GPUTextureUsage.RENDER_ATTACHMENT,
   });
 
-  function drawNextFrame() {
+  const depthTexture = device.createTexture({
+    size: [gpu.canvas.width, gpu.canvas.height, 1],
+    format: "depth24plus",
+    sampleCount: sampleCount, // Use the same sample count for depth texture
+    usage: GPUTextureUsage.RENDER_ATTACHMENT,
+  });
+
+  function drawNextFrame(time: number) {
     const textureView = gpu.context.getCurrentTexture().createView();
-    const depthTexture = device.createTexture({
-      size: [gpu.canvas.width, gpu.canvas.height, 1],
-      format: "depth24plus",
-      sampleCount: sampleCount, // Use the same sample count for depth texture
-      usage: GPUTextureUsage.RENDER_ATTACHMENT,
-    });
 
     const renderPassDescription = {
       colorAttachments: [
         {
           view: multisampledColorTexture.createView(), // Use the multisampled texture for rendering
           resolveTarget: textureView, // Resolve the multisampled texture into the canvas texture
-          clearValue: { r: 0.2, g: 0.247, b: 0.314, a: 1.0 }, // Background color
+          clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Background color
           loadOp: "clear",
           storeOp: "store",
         },
@@ -158,27 +195,38 @@ const Create3DObject = async () => {
       },
     };
 
+    // kNumRows += 1;
+    device.queue.writeBuffer(rowCountBuffer, 0, new Float32Array([kNumRows]));
+
+    device.queue.writeBuffer(timeBuffer, 0, new Float32Array([time]));
+
+    const vp = CreateViewProjection(time, gpu.canvas.width / gpu.canvas.height);
+    vpMatrix = vp.viewProjectionMatrix;
+    mat4.multiply(mvpMatrix, vpMatrix, modelMatrix);
+    device.queue.writeBuffer(mvpBuffer, 0, mvpMatrix as ArrayBuffer);
+
     const commandEncoder = device.createCommandEncoder();
     const renderPass = commandEncoder.beginRenderPass(renderPassDescription as GPURenderPassDescriptor);
+
     renderPass.setPipeline(pipeline);
     renderPass.setVertexBuffer(0, vertexBuffer);
-    renderPass.setVertexBuffer(1, colorBuffer);
-    // renderPass.setVertexBuffer(2, instanceHeightBuffer);
     renderPass.setBindGroup(0, bindGroup);
     renderPass.draw(numberOfVertices, kNumObjects * kNumRows);
     renderPass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
+    // if (kNumRows > 512) return;
+
     requestAnimationFrame(drawNextFrame);
   }
 
-  setInterval(() => {
-    uniforms[16] += 1; // Set the rowCount
-    kNumRows += 1;
-    device.queue.writeBuffer(uniformsBuffer, 0, uniforms.buffer, 0, uniforms.byteLength);
-  }, 100);
-  drawNextFrame();
+  // setInterval(() => {
+  //   console.log("total number of objects on screen:");
+  //   console.log(kNumObjects * kNumRows);
+  // }, 10000);
+
+  requestAnimationFrame(drawNextFrame);
 };
 
 Create3DObject();

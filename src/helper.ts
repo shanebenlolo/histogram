@@ -27,11 +27,24 @@ export const CreateTransforms = (
 };
 
 export const CreateViewProjection = (
+  time: number,
   respectRatio = 1.0,
-  cameraPosition: vec3 = [2, 2, 4],
   lookDirection: vec3 = [0, 0, 0],
   upDirection: vec3 = [0, 1, 0]
 ) => {
+  // Define the period for the camera movement (in milliseconds)
+  const period = 60000; // The camera will complete one oscillation every 30 seconds
+
+  // Calculate the angle for the sine function
+  const angle = ((time % period) / period) * 2 * Math.PI; // Converts time to an angle between 0 and 2π
+
+  // Calculate the camera position using the sine function
+  const cameraPosition: vec3 = [
+    -18 + 18 * Math.sin(angle), // X position oscillates between -50 and 0
+    18 - 18 * Math.sin(angle), // Y position oscillates between 0 and 50
+    18 * Math.sin(angle), // Z position oscillates between -25 and 25
+  ];
+
   const viewMatrix = mat4.create();
   const projectionMatrix = mat4.create();
   const viewProjectionMatrix = mat4.create();
