@@ -23,7 +23,8 @@ const Create3DObject = async () => {
   // const instanceHeightBuffer = CreateGPUBuffer(device, instanceHeights);
 
   // Enable multisampling by setting the sample count to 4 (you can change it based on your requirements)
-  const sampleCount = 4;
+  const multisample: boolean = false;
+  const sampleCount = multisample ? 4 : 1;
 
   const bindGroupLayout = device.createBindGroupLayout({
     entries: [
@@ -180,8 +181,8 @@ const Create3DObject = async () => {
     const renderPassDescription = {
       colorAttachments: [
         {
-          view: multisampledColorTexture.createView(), // Use the multisampled texture for rendering
-          resolveTarget: textureView, // Resolve the multisampled texture into the canvas texture
+          view: multisample ? multisampledColorTexture.createView() : textureView, // Use the multisampled texture for rendering
+          resolveTarget: multisample ? textureView : undefined, // Resolve the multisampled texture into the canvas texture
           clearValue: { r: 0.0, g: 0.0, b: 0.0, a: 1.0 }, // Background color
           loadOp: "clear",
           storeOp: "store",
@@ -196,7 +197,7 @@ const Create3DObject = async () => {
     };
 
     // kNumRows += 1;
-    device.queue.writeBuffer(rowCountBuffer, 0, new Float32Array([kNumRows]));
+    // device.queue.writeBuffer(rowCountBuffer, 0, new Float32Array([kNumRows]));
 
     device.queue.writeBuffer(timeBuffer, 0, new Float32Array([time]));
 

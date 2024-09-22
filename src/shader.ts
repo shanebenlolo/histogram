@@ -9,7 +9,8 @@ struct VertexInput {
 
 // Hash function to generate pseudo-random numbers based on instanceIndex
 fn rand(seed: f32) -> f32 {
-    let t = fract(sin(seed) * 43758.5453);
+    let scaledSeed = seed * 0.01; // Scale down the seed
+    let t = fract(sin(scaledSeed) * 43758.5453);
     return t;
 }
 
