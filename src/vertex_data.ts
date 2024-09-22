@@ -106,3 +106,10 @@ export const CubeData = () =>{
         colors
     };
 }
+
+const axisData = {
+  x: [
+    // x?
+    0.0, -25.6,
+  ],
+};

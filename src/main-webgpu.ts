@@ -1,5 +1,6 @@
 import { InitGPU, CreateGPUBuffer, CreateTransforms, CreateViewProjection, transformPositions } from "./helper";
-import { shader } from "./shader";
+import { axisShader } from "./shaders/axis";
+import { cubeShader } from "./shaders/cube";
 import "./site.css";
 import { CubeData } from "./vertex_data";
 import { mat4 } from "gl-matrix";
@@ -8,25 +9,62 @@ const Create3DObject = async () => {
   const gpu = await InitGPU();
   const device = gpu.device;
 
-  const kNumObjects = 512;
-  let kNumRows = 512;
+  const kNumObjects = 256;
+  let kNumRows = 256;
   const cubeData = CubeData();
-
-  const instanceHeights = new Float32Array(kNumObjects);
-  for (let i = 0; i < kNumObjects; i++) {
-    instanceHeights[i] = Math.random() * 20; // Random height for each cube
-  }
   const numberOfVertices = cubeData.positions.length / 3;
-
   const vertexBuffer = CreateGPUBuffer(device, cubeData.positions);
-  // const colorBuffer = CreateGPUBuffer(device, cubeData.colors);
-  // const instanceHeightBuffer = CreateGPUBuffer(device, instanceHeights);
-
-  // Enable multisampling by setting the sample count to 4 (you can change it based on your requirements)
-  const multisample: boolean = false;
+  const multisample: boolean = true;
   const sampleCount = multisample ? 4 : 1;
 
-  const bindGroupLayout = device.createBindGroupLayout({
+  const axisBindGroupLayout = device.createBindGroupLayout({
+    label: "axis bind group layout",
+    entries: [
+      {
+        binding: 0,
+        visibility: GPUShaderStage.VERTEX,
+        buffer: { type: "uniform", minBindingSize: 64 }, // 64 bytes for mat4x4<f32> + 4 bytes for rowCount + 12 bytes padding
+      },
+    ],
+  });
+  const axisPipeline = device.createRenderPipeline({
+    label: "axis pipeline",
+    layout: device.createPipelineLayout({ bindGroupLayouts: [axisBindGroupLayout] }),
+    vertex: {
+      module: device.createShaderModule({
+        code: axisShader,
+      }),
+      entryPoint: "vs_main",
+    },
+    fragment: {
+      module: device.createShaderModule({
+        code: axisShader,
+      }),
+      entryPoint: "fs_main",
+      targets: [
+        {
+          format: gpu.format as GPUTextureFormat,
+          // @ts-ignore
+          sampleCount: sampleCount,
+        },
+      ],
+    },
+    primitive: {
+      topology: "line-list" as GPUPrimitiveTopology,
+      // stripIndexFormat: "uint32" as GPUIndexFormat,
+    },
+    depthStencil: {
+      format: "depth24plus", // Ensure depth buffer is used in axis pipeline
+      depthWriteEnabled: true,
+      depthCompare: "less",
+    },
+    multisample: {
+      count: sampleCount,
+    },
+  });
+
+  const cubeBindGroupLayout = device.createBindGroupLayout({
+    label: "cube bindgroup layout",
     entries: [
       {
         binding: 0,
@@ -38,50 +76,36 @@ const Create3DObject = async () => {
         visibility: GPUShaderStage.VERTEX,
         buffer: { type: "uniform", minBindingSize: 16 }, // 4 bytes for rowCount + 12 bytes padding
       },
-      {
-        binding: 2,
-        visibility: GPUShaderStage.VERTEX,
-        buffer: { type: "uniform", minBindingSize: 16 }, // 4 bytes for rowCount + 12 bytes padding
-      },
     ],
   });
-
-  // Create the render pipeline with multisampling enabled
-  const pipeline = device.createRenderPipeline({
+  const cubePipeline = device.createRenderPipeline({
+    label: "cube pipeline",
     layout: device.createPipelineLayout({
-      bindGroupLayouts: [bindGroupLayout],
+      bindGroupLayouts: [cubeBindGroupLayout],
     }),
     vertex: {
       module: device.createShaderModule({
-        code: shader,
+        code: cubeShader,
       }),
       entryPoint: "vs_main",
       buffers: [
+        // ... position?
         {
           arrayStride: 12,
           attributes: [{ shaderLocation: 0, format: "float32x3", offset: 0 }],
         },
-        // {
-        //   arrayStride: 12,
-        //   attributes: [{ shaderLocation: 1, format: "float32x3", offset: 0 }],
-        // },
-        // {
-        //   arrayStride: 4,
-        //   stepMode: "instance",
-        //   attributes: [{ shaderLocation: 2, format: "float32", offset: 0 }],
-        // },
       ],
     },
     fragment: {
       module: device.createShaderModule({
-        code: shader,
+        code: cubeShader,
       }),
       entryPoint: "fs_main",
       targets: [
         {
           format: gpu.format as GPUTextureFormat,
           // @ts-ignore
-          sampleCount: sampleCount, // Set sample count for multisampling
+          sampleCount: sampleCount,
         },
       ],
     },
@@ -95,7 +119,7 @@ const Create3DObject = async () => {
       depthCompare: "less",
     },
     multisample: {
-      count: sampleCount, // Enable multisampling with a sample count
+      count: sampleCount,
     },
   });
 
@@ -106,26 +130,30 @@ const Create3DObject = async () => {
   const vp = CreateViewProjection(gpu.canvas.width / gpu.canvas.height);
   vpMatrix = vp.viewProjectionMatrix;
 
-  // Create a uniform buffer that combines both the MVP matrix and the time
   const mvpBuffer = device.createBuffer({
     size: 64, // 64 bytes for mat4x4<f32>
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  // Create a uniform buffer that combines both the MVP matrix and the time
-  const rowCountBuffer = device.createBuffer({
+  const axisBindGroup = device.createBindGroup({
+    layout: axisPipeline.getBindGroupLayout(0),
+    entries: [
+      {
+        binding: 0,
+        resource: {
+          buffer: mvpBuffer,
+        },
+      },
+    ],
+  });
+
+  const cubeTimeBuffer = device.createBuffer({
     size: 16, // 4 bytes for rowCount + 12 bytes padding
     usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
   });
 
-  // Create a uniform buffer that combines both the MVP matrix and the time
-  const timeBuffer = device.createBuffer({
-    size: 16, // 4 bytes for rowCount + 12 bytes padding
-    usage: GPUBufferUsage.UNIFORM | GPUBufferUsage.COPY_DST,
-  });
-
-  const bindGroup = device.createBindGroup({
-    layout: pipeline.getBindGroupLayout(0),
+  const cubeBindGroup = device.createBindGroup({
+    layout: cubePipeline.getBindGroupLayout(0),
     entries: [
       {
         binding: 0,
@@ -136,13 +164,7 @@ const Create3DObject = async () => {
       {
         binding: 1,
         resource: {
-          buffer: rowCountBuffer,
-        },
-      },
-      {
-        binding: 2,
-        resource: {
-          buffer: timeBuffer,
+          buffer: cubeTimeBuffer,
         },
       },
     ],
@@ -152,13 +174,6 @@ const Create3DObject = async () => {
   mat4.multiply(mvpMatrix, vpMatrix, modelMatrix);
 
   device.queue.writeBuffer(mvpBuffer, 0, mvpMatrix as ArrayBuffer);
-  device.queue.writeBuffer(rowCountBuffer, 0, new Float32Array([kNumRows]));
-
-  // const depthTexture = device.createTexture({
-  //   size: [gpu.canvas.width, gpu.canvas.height, 1],
-  //   format: "depth24plus",
-  //   usage: GPUTextureUsage.RENDER_ATTACHMENT,
-  // });
 
   // Create multisampled color texture
   const multisampledColorTexture = device.createTexture({
@@ -177,7 +192,6 @@ const Create3DObject = async () => {
 
   function drawNextFrame(time: number) {
     const textureView = gpu.context.getCurrentTexture().createView();
-
     const renderPassDescription = {
       colorAttachments: [
         {
@@ -196,11 +210,12 @@ const Create3DObject = async () => {
       },
     };
 
-    // kNumRows += 1;
-    // device.queue.writeBuffer(rowCountBuffer, 0, new Float32Array([kNumRows]));
+    // Update buffers
 
-    device.queue.writeBuffer(timeBuffer, 0, new Float32Array([time]));
+    // time
+    device.queue.writeBuffer(cubeTimeBuffer, 0, new Float32Array([time]));
 
+    // Camera
     const vp = CreateViewProjection(time, gpu.canvas.width / gpu.canvas.height);
     vpMatrix = vp.viewProjectionMatrix;
     mat4.multiply(mvpMatrix, vpMatrix, modelMatrix);
@@ -209,23 +224,25 @@ const Create3DObject = async () => {
     const commandEncoder = device.createCommandEncoder();
     const renderPass = commandEncoder.beginRenderPass(renderPassDescription as GPURenderPassDescriptor);
 
-    renderPass.setPipeline(pipeline);
+    // Drawing the cubes
+    renderPass.setPipeline(cubePipeline);
     renderPass.setVertexBuffer(0, vertexBuffer);
-    renderPass.setBindGroup(0, bindGroup);
+    renderPass.setBindGroup(0, cubeBindGroup);
     renderPass.draw(numberOfVertices, kNumObjects * kNumRows);
+
+    // Drawing the axis lines (same render pass)
+    renderPass.setBindGroup(0, axisBindGroup);
+    renderPass.setPipeline(axisPipeline);
+    renderPass.draw(6);
+
+    // End the render pass once after both draw calls
     renderPass.end();
 
     device.queue.submit([commandEncoder.finish()]);
 
-    // if (kNumRows > 512) return;
-
+    // Request the next frame
     requestAnimationFrame(drawNextFrame);
   }
-
-  // setInterval(() => {
-  //   console.log("total number of objects on screen:");
-  //   console.log(kNumObjects * kNumRows);
-  // }, 10000);
 
   requestAnimationFrame(drawNextFrame);
 };
