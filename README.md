@@ -1,4 +1,6 @@
-to run: 
+see it live at https://shanebenlolo.github.io/histogram/
+
+to run locally: 
 
 ```
 $ npm install
